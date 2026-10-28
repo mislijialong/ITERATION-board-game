@@ -68,8 +68,8 @@ function createRoomState(id,roomName,capacity,mode,data){
   return {id,roomName:roomName||'更迭房间',capacity,listed:false,allowSpectators:true,quick,legend,experimental,rules,rulesVersion:0,version:1,seats:[],game:null,receipts:[],createdAt:now,startedAt:null,metrics:{}};
 }
 function snapshot(r,seat,now=Date.now()){
-  const GameConfig=root.GameConfig||globalThis.GameConfig;
-  const Flow=root.Flow||globalThis.Flow;
+  // GameConfig/Flow 是全局词法绑定（浏览器内联 script 的顶层 const），
+  // 不是 window 上的属性；Node 测试里通过 globalThis 提供，直接引用即可。
   return {
     quick:!!r.quick,legend:!!r.legend,allowSpectators:r.allowSpectators===true,spectator:seat===null,room:r.id,experimental:!!r.experimental,
     roomName:r.roomName||(r.seats[0]?r.seats[0].name+'的房间':'更迭房间'),listed:!!r.listed,createdAt:r.createdAt,startedAt:r.startedAt||null,
@@ -133,6 +133,7 @@ class TabletopP2PConnection{
     if(this.isHost){
       this.setStatus('已连接');
       this.accept(snapshot(this.roomState));
+      this.saveHostState();
     }else{
       this.setStatus('已连接');
     }

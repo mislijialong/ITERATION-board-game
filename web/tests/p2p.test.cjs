@@ -25,6 +25,23 @@ test('P2P API exports host-state helpers', () => {
   assert.equal(typeof P2P.randToken, 'function');
 });
 
+test('P2P snapshot exposes rules without a backend', () => {
+  const state = P2P.createRoomState('SNAP1', '快照测试', 2, 'normal', data);
+  state.seats = [
+    { seat: 0, name: '房主', token: 't0', online: true, ready: true, seen: Date.now() },
+    { seat: 1, name: '客人', token: 't1', online: true, ready: true, seen: Date.now() }
+  ];
+  const s = P2P.snapshot(state, 0);
+  assert.equal(s.room, 'SNAP1');
+  assert.equal(s.started, false);
+  assert.equal(s.capacity, 2);
+  assert.equal(s.host, true);
+  assert.ok(Array.isArray(s.rules.moduleCards), 'rules should include moduleCards');
+  assert.equal(s.rules.researchTargets.length, 3, 'rules should include research targets');
+  assert.equal(s.seats.length, 2);
+  assert.equal(s.seats[1].name, '客人');
+});
+
 function link(host, guest) {
   host.transport = {
     name: 'test', selfId: 'HOST',

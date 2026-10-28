@@ -63,7 +63,10 @@ async function p2pResume(){
  const id=stored();if(!id)throw Error('本机没有联机身份');
  if(id.isHost){
   const saved=TabletopP2P.loadHostState();
-  if(!saved||saved.id!==id.room)throw Error('本机没有房主存档');
+  if(!saved||saved.id!==id.room){
+   localStorage.removeItem(KEY);sessionStorage.removeItem(KEY);TabletopP2P.clearHostState();
+   throw Error('未找到房主存档，请重新创建房间');
+  }
   saved.seats.forEach(s=>{if(s.seat!==0){s.online=false;s.ready=false;}});
   const state={...saved};if(saved.game)state.game=HistoryGame.restore(DATA,JSON.stringify(saved.game));
   connectP2P({...id,isHost:true},null,true,state);
@@ -74,7 +77,7 @@ async function p2pResume(){
 function p2pImportCredential(value){
  if(value?.format!=='科技史桌游P2P续接凭证')return false;
  sessionStorage.setItem(KEY,JSON.stringify({room:value.room,seat:value.seat,token:value.token,name:value.name||'',isHost:!!value.isHost,spectator:!!value.spectator}));
- void p2pResume();return true;
+ void p2pResume().catch(e=>notify(e.message));return true;
 }
 function localNew(names,options){sessionStorage.setItem(MODE_KEY,'local');connection?.close();connection=null;room=null;identity=null;localStorage.removeItem(KEY);sessionStorage.removeItem(KEY);game=new HistoryGame(DATA);game.newGame(names,Date.now()>>>0,options.experimental?options.rules:GameConfig.defaults(),{quick:options.quick,legend:options.legend});game.s.experimental=options.experimental;game.s.tableMetrics={startedAt:Date.now(),endedAt:null};Flow.advance(game,prefs());viewer=null;locked=true;save();render();}
 function openShowcaseTable(){if(!SHOWCASE)return;game=new HistoryGame(DATA);game.newGame(['玩家1','玩家2'],24092026,GameConfig.defaults());Flow.advance(game,prefs());viewer=game.s.pending?.actor??game.s.active;locked=false;status='本地视觉演示';render();}
@@ -310,7 +313,7 @@ if(SHOWCASE){
  if(invitedRoom&&previous?.room!==invitedRoom){game=null;render();document.getElementById('entry-code').value=invitedRoom;}
  else if(sessionStorage.getItem(MODE_KEY)==='home'){game=null;render();}
  else if(sessionStorage.getItem(MODE_KEY)==='local'&&game)render();
- else if(previous?.room&&previous?.token){if(P2P_ONLY)p2pResume();else connect(previous);}
+ else if(previous?.room&&previous?.token){if(P2P_ONLY)p2pResume().catch(e=>notify(e.message));else connect(previous);}
  else if(invitedRoom){game=null;render();document.getElementById('entry-code').value=invitedRoom;}
  else render();
 }
