@@ -393,6 +393,6 @@ class TabletopP2PConnection{
   }
 }
 
-const api={TabletopP2PConnection,createRoomState,snapshot,randCode,randToken,connectTransport,clone,digest,HOST_KEY};
+const api={TabletopP2PConnection,createRoomState,snapshot,randCode,randToken,connectTransport,clone,digest,HOST_KEY,loadHostState:TabletopP2PConnection.loadHostState,clearHostState:TabletopP2PConnection.clearHostState};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.TabletopP2P=api;
 })(typeof window==='undefined'?globalThis:window);

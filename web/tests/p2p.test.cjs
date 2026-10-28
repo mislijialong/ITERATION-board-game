@@ -16,6 +16,15 @@ globalThis.TabletopTesting = require(path.join(root, 'src/tabletop-v4-testing.js
 const P2P = require(path.join(root, 'src/tabletop-v4-p2p.js'));
 const data = require(path.join(root, 'game/game_data.json'));
 
+test('P2P API exports host-state helpers', () => {
+  assert.equal(typeof P2P.TabletopP2PConnection, 'function');
+  assert.equal(typeof P2P.loadHostState, 'function');
+  assert.equal(typeof P2P.clearHostState, 'function');
+  assert.equal(typeof P2P.createRoomState, 'function');
+  assert.equal(typeof P2P.randCode, 'function');
+  assert.equal(typeof P2P.randToken, 'function');
+});
+
 function link(host, guest) {
   host.transport = {
     name: 'test', selfId: 'HOST',
