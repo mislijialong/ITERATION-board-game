@@ -11,3 +11,7 @@ __pycache__/
 standalone.html
 output/
 *.log
+
+# 本地重复生成的迁移产物（云端 D1 使用 0000_init.sql）
+drizzle/meta/
+drizzle/0000_romantic_micromax.sql
