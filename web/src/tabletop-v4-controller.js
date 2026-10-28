@@ -6,6 +6,7 @@ const MODE_KEY='iteration-table-v4-active-mode';
 const KEY='iteration-table-v4-seat',SAVE='iteration-table-v4-save',PREF='iteration-table-v4-preferences';
 const LOCAL_PREVIEW=['127.0.0.1','localhost'].includes(location.hostname);
 const SHOWCASE=LOCAL_PREVIEW&&new URLSearchParams(location.search).has('showcase');
+const P2P_ONLY=window.ITERATION_P2P_ONLY===true;
 const VISUAL_KEY='iteration-table-v4-visual-comparison';
 const root=document.getElementById('table-root'),dialogs=document.getElementById('table-dialogs'),toast=document.getElementById('table-toast');
 let game=null,connection=null,room=null,viewer=null,identity=null,modal=null,locked=false,lastRevision='',status='',homeWonderIndex=0,homeWonderPaused=false,homeWonderState=null,localDraft={count:2,names:['','','',''],mode:'normal'},localOptions={quick:false,legend:false,experimental:false,rules:GameConfig.defaults()};
@@ -28,6 +29,52 @@ function connect(id,snapshot){
  connection?.close();identity=id;room=null;game=null;viewer=id.seat;status='正在连接';
  const current=new TabletopRoomConnection(id,{request,save:saveIdentity,onSnapshot:value=>{if(connection!==current)return;const changed=!room||room.version!==value.version||room.view?.revision!==value.view?.revision||JSON.stringify(room.seats)!==JSON.stringify(value.seats)||status!=='已连接';room=value;viewer=value.seat;game=value.view?Flow.remote(DATA,value.view,value.quotes):null;status=current.status;if(changed)render();},onStatus:value=>{if(connection!==current)return;status=value;const node=document.querySelector('[data-connection-status]');if(node)node.textContent=value;},onError:e=>notify(e.status===401?'请用已导出的续接凭证恢复身份':e.status?e.message:'连接中断，正在自动重试')});
  connection=current;current.store();if(snapshot)current.accept(snapshot);else render();void current.poll();
+}
+function connectP2P(id,snapshot,isHost,roomState){
+ sessionStorage.setItem(MODE_KEY,'online');
+ connection?.close();identity=id;room=null;game=isHost?(roomState?.game||null):null;viewer=id.seat;status='正在连接';
+ const current=new TabletopP2P.TabletopP2PConnection(id,{isHost,roomState,data:DATA,save:saveIdentity,
+  onSnapshot:value=>{if(connection!==current)return;const changed=!room||room.version!==value.version||room.view?.revision!==value.view?.revision||JSON.stringify(room.seats)!==JSON.stringify(value.seats)||status!=='已连接';room=value;viewer=value.seat;if(isHost){if(value.started)game=current.roomState?.game||null;}else{game=value.view?Flow.remote(DATA,value.view,value.quotes):null;}status=current.status;if(changed)render();},
+  onStatus:value=>{if(connection!==current)return;status=value;const node=document.querySelector('[data-connection-status]');if(node)node.textContent=value;},
+  onError:e=>notify(e.message)});
+ connection=current;current.store();if(snapshot)current.accept(snapshot);else render();
+ current.start().catch(e=>{if(connection===current)notify(e.message);});
+}
+async function p2pCreate(){
+ const name=document.getElementById('entry-name').value.trim()||'房主';
+ const mode=document.getElementById('entry-mode').value;
+ const capacity=Number(document.getElementById('entry-capacity').value);
+ const roomName=document.getElementById('entry-room-name').value.trim()||name+'的房间';
+ const room=TabletopP2P.randCode(5),token=TabletopP2P.randToken();
+ const state=TabletopP2P.createRoomState(room,roomName,capacity,mode,DATA);
+ state.seats=Array.from({length:capacity},(_,i)=>({seat:i,name:i===0?name:'',token:i===0?token:TabletopP2P.randToken(),online:i===0,ready:i===0,seen:Date.now()}));
+ const id={room,seat:0,token,name,isHost:true};
+ connectP2P(id,null,true,state);
+ if(mode==='experimental')open('experiment');
+}
+async function p2pJoin(code,spectator){
+ const room=String(code||document.getElementById('entry-code')?.value||'').trim().toUpperCase();
+ if(!room)throw Error('请输入房间码');
+ const nick=document.getElementById('entry-name')?.value.trim()||prompt('你的昵称');
+ if(!nick)throw Error('请输入昵称');
+ connectP2P({room,seat:null,token:null,name:nick,spectator:!!spectator,isHost:false},null,false,null);
+}
+async function p2pResume(){
+ const id=stored();if(!id)throw Error('本机没有联机身份');
+ if(id.isHost){
+  const saved=TabletopP2P.loadHostState();
+  if(!saved||saved.id!==id.room)throw Error('本机没有房主存档');
+  saved.seats.forEach(s=>{if(s.seat!==0){s.online=false;s.ready=false;}});
+  const state={...saved};if(saved.game)state.game=HistoryGame.restore(DATA,JSON.stringify(saved.game));
+  connectP2P({...id,isHost:true},null,true,state);
+ }else{
+  connectP2P(id,null,false,null);
+ }
+}
+function p2pImportCredential(value){
+ if(value?.format!=='科技史桌游P2P续接凭证')return false;
+ sessionStorage.setItem(KEY,JSON.stringify({room:value.room,seat:value.seat,token:value.token,name:value.name||'',isHost:!!value.isHost,spectator:!!value.spectator}));
+ void p2pResume();return true;
 }
 function localNew(names,options){sessionStorage.setItem(MODE_KEY,'local');connection?.close();connection=null;room=null;identity=null;localStorage.removeItem(KEY);sessionStorage.removeItem(KEY);game=new HistoryGame(DATA);game.newGame(names,Date.now()>>>0,options.experimental?options.rules:GameConfig.defaults(),{quick:options.quick,legend:options.legend});game.s.experimental=options.experimental;game.s.tableMetrics={startedAt:Date.now(),endedAt:null};Flow.advance(game,prefs());viewer=null;locked=true;save();render();}
 function openShowcaseTable(){if(!SHOWCASE)return;game=new HistoryGame(DATA);game.newGame(['玩家1','玩家2'],24092026,GameConfig.defaults());Flow.advance(game,prefs());viewer=game.s.pending?.actor??game.s.active;locked=false;status='本地视觉演示';render();}
@@ -125,6 +172,10 @@ async function advanceHomeWonder(manual=true){
  state.busy=false;state.manual=false;
  void state.preload(next+2);state.sync();
 }
+function onlineHTML(){
+ if(P2P_ONLY)return `<section class="v4-online-entry" id="v4-online-entry"><div class="v4-online-heading"><p class="v4-eyebrow">各自设备 · 2–4人 · 无需服务器</p><h2>邀请朋友，P2P 在线同桌</h2><p>房主浏览器作为主机，玩家间通过 WebRTC 直连。本页托管在 GitHub Pages，打开同一个网址即可加入，无需注册。</p></div><div class="v4-online-fields"><label>你的昵称<input id="entry-name" maxlength="24" placeholder="请输入昵称"></label><label>房间名称<input id="entry-room-name" maxlength="40" placeholder="例如：周五测试局"></label><label>玩家人数<select id="entry-capacity"><option>2</option><option>3</option><option>4</option></select></label><label>对局模式<select id="entry-mode"><option value="normal">标准模式</option><option value="quick">疾速模式</option><option value="legend">一战封神</option><option value="experimental">实验模式</option></select></label></div><div class="v4-online-actions"><button class="v4-original-primary" data-app="p2p-create">创建 P2P 房间</button><button data-app="p2p-resume">续接联机身份</button></div><div class="v4-home-join"><input id="entry-code" maxlength="10" placeholder="朋友提供的房间码" aria-label="房间码"><button data-app="p2p-join">加入房间</button><button data-app="p2p-watch">按房间码观战</button></div><p class="v4-home-privacy">房主浏览器运行权威规则；请与信任的朋友游玩。</p></section>`;
+ return `<section class="v4-online-entry" id="v4-online-entry"><div class="v4-online-heading"><p class="v4-eyebrow">各自设备 · 2–4人 · 私人手牌</p><h2>邀请朋友，在线同桌</h2><p>使用昵称和房间码加入，无需注册。电脑与手机可以一起玩。</p></div><div class="v4-online-fields"><label>你的昵称<input id="entry-name" maxlength="24" placeholder="请输入昵称"></label><label>房间名称<input id="entry-room-name" maxlength="40" placeholder="例如：周五测试局"></label><label>玩家人数<select id="entry-capacity"><option>2</option><option>3</option><option>4</option></select></label><label>对局模式<select id="entry-mode"><option value="normal">标准模式</option><option value="quick">疾速模式</option><option value="legend">一战封神</option><option value="experimental">实验模式</option></select></label></div><div class="v4-home-checks"><label class="check"><input id="entry-listed" type="checkbox" checked>在大厅显示</label><label class="check"><input id="entry-spectators" type="checkbox" checked>允许观战</label></div><div class="v4-online-actions"><button class="v4-original-primary" data-app="create">创建联机房间</button><button data-app="rooms">浏览房间大厅</button><button data-app="resume-online">续接联机身份</button></div><div class="v4-home-join"><input id="entry-code" maxlength="10" placeholder="朋友提供的房间码" aria-label="房间码"><button data-app="join">加入房间</button><button data-app="watch">按房间码观战</button></div></section>`;
+}
 function homeHTML(){
  return `${visualStripHTML('home')}<div class="v4-entry">
   <header class="v4-entry-header"><div class="v4-brand"><small>ITERATION · HISTORY OF TECHNOLOGY</small><strong>更迭 · 科技史桌游</strong></div><nav aria-label="首页导航"><button data-app="catalog">卡牌大全</button><button data-app="rules">规则说明</button><button data-app="appearance">外观</button><button data-app="preferences">设置</button><button data-app="experiment">实验模式设置</button><button data-app="import-save">导入存档</button><button data-app="scroll-online">联机对局</button></nav></header>
@@ -137,8 +188,8 @@ function homeHTML(){
    <section class="v4-mode-card v4-mode-workshop"><p class="v4-mode-kicker">特殊玩法</p><h3>疾速模式 · 一战封神</h3><p>保留已实现的两种特别模式及其专属开局规则。</p><div class="v4-mode-actions"><button data-app="start-local" data-mode="quick">开始疾速模式</button><button data-app="start-local" data-mode="legend">开始一战封神</button></div></section>
    <button class="v4-resume-local" data-app="resume-local">继续上次对局</button><p class="v4-home-privacy">交接设备时会遮挡私人手牌。无需联网。</p>
   </section></main>
-  <section class="v4-online-entry" id="v4-online-entry"><div class="v4-online-heading"><p class="v4-eyebrow">各自设备 · 2–4人 · 私人手牌</p><h2>邀请朋友，在线同桌</h2><p>使用昵称和房间码加入，无需注册。电脑与手机可以一起玩。</p></div><div class="v4-online-fields"><label>你的昵称<input id="entry-name" maxlength="24" placeholder="请输入昵称"></label><label>房间名称<input id="entry-room-name" maxlength="40" placeholder="例如：周五测试局"></label><label>玩家人数<select id="entry-capacity"><option>2</option><option>3</option><option>4</option></select></label><label>对局模式<select id="entry-mode"><option value="normal">标准模式</option><option value="quick">疾速模式</option><option value="legend">一战封神</option><option value="experimental">实验模式</option></select></label></div><div class="v4-home-checks"><label class="check"><input id="entry-listed" type="checkbox" checked>在大厅显示</label><label class="check"><input id="entry-spectators" type="checkbox" checked>允许观战</label></div><div class="v4-online-actions"><button class="v4-original-primary" data-app="create">创建联机房间</button><button data-app="rooms">浏览房间大厅</button><button data-app="resume-online">续接联机身份</button></div><div class="v4-home-join"><input id="entry-code" maxlength="10" placeholder="朋友提供的房间码" aria-label="房间码"><button data-app="join">加入房间</button><button data-app="watch">按房间码观战</button></div></section>
- </div>`;
+  ${onlineHTML()}
+  </div>`;
 }
 function lobbyHTML(){return '<div class="v4-lobby"><header><div class="v4-mark">更迭 <span>ITERATION</span></div><button data-app="leave">返回首页</button></header><main><div class="v4-lobby-top"><div><small>联机房间 · '+escape(status)+'</small><h1>'+escape(room.roomName)+'</h1><p>房间码 <strong class="code">'+escape(room.room)+'</strong> <button data-app="copy-code">复制</button></p></div><div class="v4-mode-pill">'+escape(room.legend?'一战封神':room.quick?'疾速模式':room.experimental?'实验模式':'标准模式')+'</div></div><div class="v4-lobby-layout"><section><h2>玩家席位 '+room.seats.length+' / '+room.capacity+'</h2><div class="v4-seat-grid">'+Array.from({length:room.capacity},(_,i)=>'<div class="v4-seat-card">'+(room.seats[i]?'<b>'+escape(room.seats[i].name)+'</b><span>'+((room.seats[i].ready?'已准备':'未准备')+' · '+(room.seats[i].online?'在线':'离线'))+'</span>':'<b>等待加入</b>')+'</div>').join('')+'</div><div class="v4-lobby-actions">'+(room.spectator?'':room.host?'<button class="primary" data-app="start-room">全部到齐后开始</button>':'<button class="primary" data-app="ready">'+(room.seats[room.seat]?.ready?'取消准备':'准备')+'</button>')+'<button data-app="copy-invite">复制邀请链接</button>'+(room.spectator?'':'<button data-app="export-seat">导出续接凭证</button>')+'</div></section><section><h2>房间设置</h2>'+(!room.host?'<p>由房主设置模式和实验参数。</p>':'<label>模式<select id="lobby-mode"><option value="normal"'+(!room.quick&&!room.legend&&!room.experimental?' selected':'')+'>标准模式</option><option value="quick"'+(room.quick?' selected':'')+'>疾速模式</option><option value="legend"'+(room.legend?' selected':'')+'>一战封神</option><option value="experimental"'+(room.experimental?' selected':'')+'>实验模式</option></select></label><button data-app="save-mode">切换模式</button><label>房间名称<input id="lobby-name" value="'+escape(room.roomName)+'"></label><label class="check"><input id="lobby-listed" type="checkbox"'+(room.listed?' checked':'')+'>在大厅显示</label><label class="check"><input id="lobby-spectators" type="checkbox"'+(room.allowSpectators?' checked':'')+'>允许观战</label><button data-app="save-room">保存房间设置</button>')+(!room.spectator&&room.experimental?'<button data-app="experiment">调整本局实验数值</button>':'')+(room.spectator?'':'<button data-app="preferences">个人操作偏好</button>')+'<p class="v4-rule-tag">最终挑战：每骰 '+room.rules.finalDiePrice+' 科研 · 资源：混合牌堆</p></section></div></main></div>';}
 function download(name,data){const blob=new Blob([data],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -210,15 +261,29 @@ async function dispatch(name,target){if(name.startsWith('preset-')||['game-stats
  case 'visual-home':if(SHOWCASE)window.TableController.home();break;
  case 'visual-table':openShowcaseTable();break;
  case 'close-modal':close();break;case 'wonder-next':void advanceHomeWonder(true);break;case 'wonder-toggle':homeWonderPaused=!homeWonderPaused;target.textContent=homeWonderPaused?'播放':'暂停';target.setAttribute('aria-label',(homeWonderPaused?'播放':'暂停')+'奇观轮播');homeWonderState?.sync();break;case 'scroll-online':document.getElementById('v4-online-entry')?.scrollIntoView({behavior:'smooth'});break;case 'rules':open('rules');break;case 'catalog':open('catalog');break;case 'appearance':open('appearance');break;case 'card-detail':open('detail',{id:target.dataset.id});break;case 'resource-detail':open('resourceDetail',{id:target.dataset.id});break;case 'local-setup':open('localSetup');break;case 'rooms':open('rooms');break;
- case 'create':{const name=document.getElementById('entry-name').value.trim(),mode=document.getElementById('entry-mode').value;const result=await request('create',{name,roomName:document.getElementById('entry-room-name').value.trim()||name+'的房间',capacity:Number(document.getElementById('entry-capacity').value),listed:document.getElementById('entry-listed').checked,allowSpectators:document.getElementById('entry-spectators').checked,quick:mode==='quick',legend:mode==='legend',experimental:mode==='experimental'});connect({room:result.room,token:result.token,seat:result.seat},result);if(mode==='experimental')open('experiment');break;}
- case 'join':case 'watch':{const code=document.getElementById('entry-code')?.value.trim().toUpperCase()||target.dataset.room;if(!code)throw Error('请输入房间码');if(name==='watch'){const result=await request('watch?room='+encodeURIComponent(code));connect({room:code,spectator:true,seat:null},result);}else{const nick=document.getElementById('entry-name')?.value.trim()||prompt('你的昵称');if(!nick)throw Error('请输入昵称');const result=await request('join',{room:code,name:nick});connect({room:code,token:result.token,seat:result.seat},result);}close();break;}
+ case 'create':{
+  if(P2P_ONLY)return p2pCreate();
+  const name=document.getElementById('entry-name').value.trim(),mode=document.getElementById('entry-mode').value;const result=await request('create',{name,roomName:document.getElementById('entry-room-name').value.trim()||name+'的房间',capacity:Number(document.getElementById('entry-capacity').value),listed:document.getElementById('entry-listed').checked,allowSpectators:document.getElementById('entry-spectators').checked,quick:mode==='quick',legend:mode==='legend',experimental:mode==='experimental'});connect({room:result.room,token:result.token,seat:result.seat},result);if(mode==='experimental')open('experiment');break;}
+ case 'p2p-create':await p2pCreate();break;
+ case 'p2p-join':await p2pJoin(null,false);close();break;
+ case 'p2p-watch':await p2pJoin(null,true);close();break;
+ case 'p2p-resume':await p2pResume();break;
+ case 'join':case 'watch':{
+  const code=document.getElementById('entry-code')?.value.trim().toUpperCase()||target.dataset.room;if(!code)throw Error('请输入房间码');
+  if(P2P_ONLY){await p2pJoin(code,name==='watch');close();break;}
+  if(name==='watch'){const result=await request('watch?room='+encodeURIComponent(code));connect({room:code,spectator:true,seat:null},result);}else{const nick=document.getElementById('entry-name')?.value.trim()||prompt('你的昵称');if(!nick)throw Error('请输入昵称');const result=await request('join',{room:code,name:nick});connect({room:code,token:result.token,seat:result.seat},result);}close();break;}
  case 'room-select':{const code=target.dataset.room;const item=await request('rooms');const r=item.rooms.find(x=>x.room===code);if(!r)return;if(r.joinable){const nick=prompt('你的昵称');if(!nick)return;const result=await request('join',{room:code,name:nick});connect({room:code,token:result.token,seat:result.seat},result);}else if(r.watchable){const result=await request('watch?room='+code);connect({room:code,spectator:true,seat:null},result);}close();break;}
- case 'resume-online':{const id=stored();if(!id)throw Error('本机没有联机身份');const result=await request('state?room='+encodeURIComponent(id.room),null,id.token);connect(id,result);break;}
+ case 'resume-online':{
+  const id=stored();if(!id)throw Error('本机没有联机身份');
+  if(P2P_ONLY)return p2pResume();
+  const result=await request('state?room='+encodeURIComponent(id.room),null,id.token);connect(id,result);break;}
  case 'resume-local':{sessionStorage.setItem(MODE_KEY,'local');const raw=localStorage.getItem(SAVE);if(!raw)throw Error('本机没有存档');game=HistoryGame.restore(DATA,raw);connection?.close();connection=null;room=null;viewer=null;locked=true;render();break;}
- case 'import-save':fileInput(async value=>{if(value?.format==='科技史桌游玩家续接凭证'){if(value.server!==location.origin)throw Error('请在凭证对应的网址使用');const result=await request('state?room='+value.room,null,value.token);connect({room:value.room,token:value.token,seat:result.seat},result);}else{game=HistoryGame.restore(DATA,JSON.stringify(value));connection?.close();connection=null;room=null;viewer=null;locked=true;save();render();}});break;
+ case 'import-save':fileInput(async value=>{
+  if(P2P_ONLY&&p2pImportCredential(value))return;
+  if(value?.format==='科技史桌游玩家续接凭证'){if(value.server!==location.origin)throw Error('请在凭证对应的网址使用');const result=await request('state?room='+value.room,null,value.token);connect({room:value.room,token:value.token,seat:result.seat},result);}else{game=HistoryGame.restore(DATA,JSON.stringify(value));connection?.close();connection=null;room=null;viewer=null;locked=true;save();render();}});break;
  case 'start-local':{const count=Number(document.getElementById('local-count').value),names=Array.from({length:count},(_,i)=>document.getElementById('local-name-'+i).value.trim()||'玩家'+(i+1)),mode=target.dataset.mode||document.getElementById('local-mode')?.value||'normal';localNew(names,{quick:mode==='quick',legend:mode==='legend',experimental:mode==='experimental',rules:localOptions.rules});close();break;}
- case 'copy-code':await navigator.clipboard.writeText(room.room);notify('房间码已复制');break;case 'copy-invite':await navigator.clipboard.writeText(location.origin+'/?room='+room.room);notify('邀请链接已复制');break;
- case 'export-seat':{if(!identity?.token)throw Error('观战者没有玩家凭证');download('更迭-玩家续接凭证.json',JSON.stringify({format:'科技史桌游玩家续接凭证',room:identity.room,token:identity.token,server:location.origin}));break;}
+ case 'copy-code':await navigator.clipboard.writeText(room.room);notify('房间码已复制');break;case 'copy-invite':{const base=location.href.split('?')[0];await navigator.clipboard.writeText(base+'?room='+room.room);notify('邀请链接已复制');break;}
+ case 'export-seat':{if(!identity?.token)throw Error('观战者没有玩家凭证');if(P2P_ONLY)download('更迭-P2P续接凭证.json',JSON.stringify({format:'科技史桌游P2P续接凭证',room:identity.room,seat:identity.seat,token:identity.token,name:identity.name||'',isHost:!!identity.isHost,spectator:!!identity.spectator}));else download('更迭-玩家续接凭证.json',JSON.stringify({format:'科技史桌游玩家续接凭证',room:identity.room,token:identity.token,server:location.origin}));break;}
  case 'leave':sessionStorage.setItem(MODE_KEY,'home');connection?.close();connection=null;room=null;game=null;viewer=null;render();break;
  case 'ready':await connection.lobby('ready',{ready:!room.seats[room.seat].ready});break;case 'start-room':await connection.lobby('start');break;
  case 'save-mode':{const mode=document.getElementById('lobby-mode').value;await connection.lobby('mode',{quick:mode==='quick',legend:mode==='legend',experimental:mode==='experimental',version:room.rulesVersion});break;}

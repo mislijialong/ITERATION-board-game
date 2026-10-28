@@ -4,9 +4,11 @@ import hashlib
 import json
 
 ROOT = Path(__file__).resolve().parents[1]
-data = json.loads((ROOT / 'game/game_data.json').read_text())
-assets = json.loads((ROOT / 'src/card-assets.json').read_text())
-metadata = json.loads((ROOT / 'src/card-assets.metadata.json').read_text())
+# Windows 中文系统默认 GBK，必须显式用 UTF-8 读写，否则含中文的 JSON 解码失败。
+UTF8 = dict(encoding='utf-8')
+data = json.loads((ROOT / 'game/game_data.json').read_text(**UTF8))
+assets = json.loads((ROOT / 'src/card-assets.json').read_text(**UTF8))
+metadata = json.loads((ROOT / 'src/card-assets.metadata.json').read_text(**UTF8))
 assert set(assets) == set(metadata['assets'])
 assert set(metadata['missingFullCardFaces']) <= {'T2-06'}
 for key, entry in metadata['assets'].items():
@@ -26,10 +28,10 @@ for wonder in data['wonders']:
 assert len(data['tech']) == 60 and len(data['events']) == 14 and len(data['wonders']) == 15
 def safe_json(value):
     return json.dumps(value, ensure_ascii=False, separators=(',', ':')).replace('</', '<\\/')
-html = (ROOT / 'src/tabletop-v4.html').read_text()
+html = (ROOT / 'src/tabletop-v4.html').read_text(**UTF8)
 html = html.replace('<!-- GAME_DATA -->', '<script id="card-data" type="application/json">'+safe_json(data)+'</script>')
 html = html.replace('<!-- CARD_ASSETS -->', '<script id="tabletop-assets" type="application/json">'+safe_json(asset_urls)+'</script>')
-html = html.replace('<!-- RULE_ENGINE -->', ''.join('<script>'+ (ROOT / 'game' / name).read_text().replace('</script', '<\\/script') + '</script>' for name in ('game_config.js','game_engine.js','game_flow.js')))
+html = html.replace('<!-- RULE_ENGINE -->', ''.join('<script>'+ (ROOT / 'game' / name).read_text(**UTF8).replace('</script', '<\\/script') + '</script>' for name in ('game_config.js','game_engine.js','game_flow.js')))
 target = ROOT / 'standalone.html'
-target.write_text(html)
+target.write_text(html, **UTF8)
 print(f'Built {target.name} ({target.stat().st_size} bytes)')

@@ -32,3 +32,25 @@ npm start
 可用 `PYTHON=/path/to/python3 npm run build` 指定 Python 路径。修改印刷卡面后，需要同步更新网页图片和 `src/card-assets.metadata.json` 中的来源摘要，否则构建会提示图片来源不一致。
 
 目前 `T2-06` 缺少完整科技卡面，网页版使用插画替代；其他卡面与来源见 [`src/card-assets-notes.md`](src/card-assets-notes.md)。
+
+## 发布到 GitHub Pages 实现多人联机
+
+网页版内置了 **P2P 联机模式**：房主浏览器作为权威主机，访客通过 WebRTC 直连（Trystero/webConnect 公共信令），不需要任何后端服务器，因此可以整个发布到 GitHub Pages 等静态托管。规则引擎与服务器版完全相同，私有手牌按座位分别下发。
+
+```sh
+npm run build:pages
+```
+
+该命令生成完全自包含的 `dist-pages/`（`index.html` + `assets/`，CSS/JS/规则引擎全部内联、资源路径改为相对路径），并开启 `window.ITERATION_P2P_ONLY`，首页联机区自动切换为 P2P 入口。
+
+仓库根目录已提供 GitHub Actions 工作流 `.github/workflows/pages.yml`：推送到 `main` 分支后自动构建 `web/dist-pages/` 并发布到 GitHub Pages。启用方式：
+
+1. 将本仓库推送到 GitHub（`git remote add origin git@github.com:<用户名>/<仓库>.git && git push -u origin main`）。
+2. 在 GitHub 仓库页面 **Settings → Pages** 中，将 **Source** 设置为 **GitHub Actions**（无需手动上传文件）。
+3. 等待工作流运行完成，访问 `https://<用户名>.github.io/<仓库>/` 即可游玩；把页面地址（`?room=房间码` 邀请链接）发给朋友即可联机。
+
+注意事项：
+
+- P2P 模式依赖浏览器 WebRTC 与公共信令服务器，适合熟人联机；房主掉线则对局暂停，房主刷新后可通过“续接联机身份”恢复。
+- 服务器版（`npm start`）不受影响，仍提供 HTTP 房间、观战与云端 D1 方案。
+- Windows 中文系统下，构建脚本已显式按 UTF-8 读写文件；`build-site.mjs` 与 `build-pages.mjs` 会自动在 Windows 上使用 `python`（可用 `PYTHON=/path/to/python npm run build` 覆盖）。

@@ -33,7 +33,7 @@ https://github.com/user-attachments/assets/538be30b-82ed-4365-b802-578c14e050f4
 | [`卡牌/奇观/`](卡牌/奇观/) | 按时代分组的奇观卡面与卡背 |
 | [`卡牌/资源/`](卡牌/资源/) | 金币、人力、矿物的 1、2、5、10 点卡面与卡背 |
 | [`宣传片/`](宣传片/README.md) | 90 秒4K宣传片制作工程、AI原视频、配乐与分镜；成片见 [Release](https://github.com/AceMetric/ITERATION-board-game/releases/tag/promo-2026-10-10) |
-| [`web/`](web/) | 辅助试玩和数值测试的网页版源码；开发说明见 [`web/README.md`](web/README.md) |
+| [`web/`](web/) | 辅助试玩和数值测试的网页版源码；含 P2P 联机模式，可发布到 GitHub Pages 直接多人对战，开发说明见 [`web/README.md`](web/README.md) |
 
 文件夹中的卡面图是不同牌面的图稿，不是应打印的张数。资源牌的具体张数、各时代牌库的使用方法请以说明书为准。同名奇观在不同时代有不同费用或效果，因此各时代的版本均保留。
 

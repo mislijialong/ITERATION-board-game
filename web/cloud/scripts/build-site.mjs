@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const output=resolve(root,'dist');
-const python=process.env.PYTHON||'python3';
+const python=process.env.PYTHON||(process.platform==='win32'?'python':'python3');
 const build=spawnSync(python,[resolve(root,'scripts/build-standalone.py')],{cwd:root,stdio:'inherit'});
 if(build.status!==0)throw Error('HTML build failed');
 await rm(output,{recursive:true,force:true});
@@ -13,7 +13,7 @@ await mkdir(resolve(output,'server'),{recursive:true});
 await mkdir(resolve(output,'client','source'),{recursive:true});
 await mkdir(resolve(output,'.openai'),{recursive:true});
 await copyFile(resolve(root,'standalone.html'),resolve(output,'client/index.html'));
-for(const name of ['tabletop-v4.css','tabletop-v4-controller.js','tabletop-v4-board.js','tabletop-v4-assist.js','tabletop-v4-testing.js','tabletop-v4-network.js']){
+for(const name of ['tabletop-v4.css','tabletop-v4-controller.js','tabletop-v4-board.js','tabletop-v4-assist.js','tabletop-v4-testing.js','tabletop-v4-network.js','tabletop-v4-p2p.js']){
   await copyFile(resolve(root,'src/'+name),resolve(output,'client/source/'+name));
 }
 await cp(resolve(root,'assets'),resolve(output,'client/assets'),{recursive:true});

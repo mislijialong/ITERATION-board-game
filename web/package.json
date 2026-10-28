@@ -5,6 +5,7 @@
   "scripts": {
     "db:generate": "drizzle-kit generate",
     "build": "node cloud/scripts/build-site.mjs",
+    "build:pages": "node cloud/scripts/build-pages.mjs",
     "start": "node server.cjs",
     "test": "node --test tests/*.test.cjs cloud/tests/adapter.test.mjs",
     "test:rules": "node --test tests/payment_change.test.cjs tests/tabletop-assist.test.cjs"

@@ -31,7 +31,7 @@ function createServer(options={}) {
     }
     const asset = /^\/assets\/[a-zA-Z0-9_-]+\.webp$/.test(pathname) || /^\/assets\/home-wonder-W\d\d\.png$/.test(pathname);
     const previewV4 = pathname==='/preview-v4';
-    const source = ['/source/tabletop-v4.css','/source/tabletop-v4-controller.js','/source/tabletop-v4-board.js','/source/tabletop-v4-assist.js','/source/tabletop-v4-testing.js','/source/tabletop-v4-network.js'].includes(pathname);
+    const source = ['/source/tabletop-v4.css','/source/tabletop-v4-controller.js','/source/tabletop-v4-board.js','/source/tabletop-v4-assist.js','/source/tabletop-v4-testing.js','/source/tabletop-v4-network.js','/source/tabletop-v4-p2p.js'].includes(pathname);
     if (!asset && !source && !previewV4) return original(req,res);
     if (!['GET','HEAD'].includes(req.method)) { res.writeHead(405);res.end();return; }
     const file=previewV4?path.join(ROOT,'standalone.html'):source?path.join(ROOT,'src',pathname.slice('/source/'.length)):path.join(ROOT,pathname.slice(1));
