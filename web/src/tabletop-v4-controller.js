@@ -310,7 +310,7 @@ if(SHOWCASE){
  if(invitedRoom&&previous?.room!==invitedRoom){game=null;render();document.getElementById('entry-code').value=invitedRoom;}
  else if(sessionStorage.getItem(MODE_KEY)==='home'){game=null;render();}
  else if(sessionStorage.getItem(MODE_KEY)==='local'&&game)render();
- else if(previous?.room&&previous?.token)connect(previous);
+ else if(previous?.room&&previous?.token){if(P2P_ONLY)p2pResume();else connect(previous);}
  else if(invitedRoom){game=null;render();document.getElementById('entry-code').value=invitedRoom;}
  else render();
 }
