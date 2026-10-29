@@ -99,6 +99,7 @@ test('P2P handshake, ready and start with private views', async () => {
   assert.ok(!Array.isArray(lastGuest.view.players[0].hand), 'guest must not see host hand');
   const lastHost = hostSnaps[hostSnaps.length - 1];
   assert.ok(Array.isArray(lastHost.view.players[0].hand), 'host sees own hand');
+  host.close(); guest.close();
 });
 
 test('P2P guest command is acknowledged and applied by host', async () => {
@@ -124,4 +125,6 @@ test('P2P guest command is acknowledged and applied by host', async () => {
   assert.ok(after.version > beforeVersion, 'guest should receive a newer snapshot');
   assert.ok(after.view.revision > rev, 'guest revision should advance');
   assert.equal(guest.pending, null, 'guest pending command should be cleared');
+  assert.equal(guest.status, '已连接', 'guest status should return to 已连接 after ack (no stuck reconnect state)');
+  host.close(); guest.close();
 });

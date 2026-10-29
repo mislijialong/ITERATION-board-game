@@ -10,9 +10,10 @@ const APP_ID='iteration-board-game';
 const APP_PASSWORD='iteration-board-game';
 const ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const HOST_KEY='iteration-table-v4-p2p-host-v1';
+const ROUTE_KEY='iteration-table-v4-p2p-route';
 const TRYSTERO_URLS=['https://esm.sh/trystero@0.26.0','https://cdn.jsdelivr.net/npm/trystero@0.26.0/+esm'];
 const WEBCONNECT_URL='https://cdn.jsdelivr.net/npm/webconnect/dist/umd/webconnect.js';
-const P2P_DEFAULT='auto';
+const P2P_DEFAULT='webconnect';
 
 /* ---------- utilities ---------- */
 function randCode(len){const a=new Uint32Array(len);crypto.getRandomValues(a);let s='';for(let i=0;i<len;i++)s+=ALPHABET[a[i]%ALPHABET.length];return s;}
@@ -52,12 +53,26 @@ async function connectTrystero(roomId, events){
   return t;
 }
 
-function resolveLib(){const p=new URLSearchParams(location.search).get('p2p');if(p==='webconnect'||p==='trystero')return p;return P2P_DEFAULT;}
+function resolveLib(){
+  const p=new URLSearchParams(location.search).get('p2p');
+  if(p==='webconnect'||p==='trystero'||p==='auto')return p;
+  try{const s=localStorage.getItem(ROUTE_KEY);if(s==='webconnect'||s==='trystero'||s==='auto')return s;}catch{}
+  return P2P_DEFAULT;
+}
 async function connectTransport(roomId, events){
   const lib=resolveLib();
-  if(lib==='webconnect')return connectWebConnect(roomId,events);
+  const explicit=new URLSearchParams(location.search).get('p2p');
+  if(lib==='webconnect'){
+    try{return await connectWebConnect(roomId,events);}
+    catch(e){if(explicit==='webconnect'||explicit==='trystero')throw e;return connectTrystero(roomId,events);}
+  }
+  if(lib==='trystero'){
+    try{return await connectTrystero(roomId,events);}
+    catch(e){if(explicit==='webconnect'||explicit==='trystero')throw e;return connectWebConnect(roomId,events);}
+  }
+  // auto：先 Trystero，失败回退 webConnect
   try{return await connectTrystero(roomId,events);}
-  catch(e){if(lib==='trystero')throw e;return connectWebConnect(roomId,events);}
+  catch(e){return connectWebConnect(roomId,events);}
 }
 
 /* ---------- host room state (mirrors game_server.cjs room object) ---------- */
@@ -94,6 +109,7 @@ class TabletopP2PConnection{
     this.retryTimer=null;this.lobbyResolve=null;this.lobbyVersion=-1;this.version=-1;
     this.status='正在连接';this.transport=null;this.hostPeerId=null;this.joined=false;this.lib=null;
     this.seatByPeer=new Map();this.peerBySeat=new Map();this.spectators=new Map();
+    this.heartbeatTimer=null;this._presenceKey='';this.rejoinTimer=null;
   }
   setStatus(v){if(this.closed)return;this.status=v;this.onStatus(v);}
   store(){if(!this.closed&&!this.id.spectator)this.save({...this.id,pending:this.pending});}
@@ -101,20 +117,19 @@ class TabletopP2PConnection{
     if(this.closed||snapshot.version<this.version)return;
     this.version=snapshot.version;
     const acked=!!ack&&!!this.pending&&ack===this.pending.id;
-    this.status=acked||this.pending?'正在确认操作':'已连接';
-    this.onSnapshot(snapshot);this.onStatus(this.status);
     if(acked){
       this.cancel(this.retryTimer);this.cancel(this.pendingTimer);
       this.pending=null;this.store();
       if(this.pendingResolve){const r=this.pendingResolve;this.pendingResolve=null;r();}
     }
+    this.status=this.pending?'正在确认操作':'已连接';
+    this.onSnapshot(snapshot);this.onStatus(this.status);
     if(this.lobbyResolve&&snapshot.version>this.lobbyVersion){const r=this.lobbyResolve;this.lobbyResolve=null;this.cancel(this.lobbyTimer);r.resolve();}
   }
 
   /* ---------- lifecycle ---------- */
-  async start(){
-    if(this.closed)return;
-    const events={
+  buildEvents(){
+    return {
       onPeerJoin:peerId=>{if(this.isHost&&this.transport)this.transport.sendTo(peerId,{kind:'whoami'});},
       onPeerLeave:peerId=>{
         if(this.isHost){
@@ -123,12 +138,17 @@ class TabletopP2PConnection{
           this.seatByPeer.delete(peerId);this.peerBySeat.delete(seat);this.spectators.delete(peerId);
           this.saveHostState();this.broadcastSnapshots();
         }else if(peerId===this.hostPeerId){
-          this.setStatus('房主已离开');this.onError(Error('房主已离开房间'));
+          this.setStatus('房主已离开，正在重连');
+          this.onError(Error('房主已离开房间，正在重连'));
+          this.reconnect();
         }
       },
       onMessage:(data,peerId)=>this.handleMessage(data,peerId)
     };
-    this.transport=await connectTransport(this.id.room,events);
+  }
+  async start(){
+    if(this.closed)return;
+    this.transport=await connectTransport(this.id.room,this.buildEvents());
     this.lib=this.transport.name;
     if(this.isHost){
       this.setStatus('已连接');
@@ -137,18 +157,69 @@ class TabletopP2PConnection{
     }else{
       this.setStatus('已连接');
     }
+    this.cancel(this.heartbeatTimer);
+    this.heartbeatTimer=this.schedule(()=>this.heartbeat(),5000);
+  }
+  async reconnect(){
+    if(this.closed||this.isHost)return;
+    this.cancel(this.rejoinTimer);
+    this.setStatus('正在重连');
+    try{
+      try{if(this.transport&&this.transport.leave)this.transport.leave();}catch{}
+      this.transport=null;this.hostPeerId=null;this.joined=false;
+      this.transport=await connectTransport(this.id.room,this.buildEvents());
+      this.lib=this.transport.name;
+      this.setStatus('已连接');
+    }catch(e){
+      this.setStatus('连接中断，正在重试');
+      this.rejoinTimer=this.schedule(()=>this.reconnect(),3000);
+    }
+  }
+  sendSafe(peerId,msg){
+    try{
+      if(!this.transport)throw Error('无传输连接');
+      this.transport.sendTo(peerId,msg);
+      return true;
+    }catch(e){
+      if(this.closed)return false;
+      if(!this.isHost){
+        this.setStatus('连接中断，正在重连');
+        this.onError(Error('连接中断，正在重连'));
+        void this.reconnect();
+      }else if(peerId){
+        const seat=this.seatByPeer.get(peerId);
+        if(seat!==undefined&&this.roomState.seats[seat]){this.roomState.seats[seat].online=false;this.roomState.seats[seat].ready=false;}
+        this.seatByPeer.delete(peerId);this.peerBySeat.delete(seat);this.spectators.delete(peerId);
+        this.saveHostState();
+      }
+      return false;
+    }
+  }
+  heartbeat(){
+    if(this.closed)return;
+    if(this.isHost){
+      const r=this.roomState,now=Date.now();
+      if(r.seats[this.id.seat])r.seats[this.id.seat].seen=now;
+      for(const seat of this.seatByPeer.values()){if(r.seats[seat])r.seats[seat].seen=now;}
+      const key=r.seats.map(s=>s.online?'1':'0').join('');
+      if(key!==this._presenceKey){this._presenceKey=key;this.broadcastSnapshots();}
+      else if(!r.game){this.broadcastSnapshots();}
+    }else if(this.transport&&this.hostPeerId){
+      this.sendSafe(this.hostPeerId,{kind:'ping'});
+    }
+    this.heartbeatTimer=this.schedule(()=>this.heartbeat(),5000);
   }
   poll(){
     if(this.closed||this.polling)return;
     this.polling=true;
     try{
       if(this.isHost)this.accept(snapshot(this.roomState));
-      else if(this.transport&&this.hostPeerId)this.transport.sendTo(this.hostPeerId,{kind:'state-request'});
+      else if(this.transport&&this.hostPeerId)this.sendSafe(this.hostPeerId,{kind:'state-request'});
     }finally{this.polling=false;}
   }
   close(){
     this.closed=true;
-    this.cancel(this.retryTimer);this.cancel(this.pendingTimer);
+    this.cancel(this.retryTimer);this.cancel(this.pendingTimer);this.cancel(this.heartbeatTimer);this.cancel(this.lobbyTimer);this.cancel(this.rejoinTimer);
     try{if(this.transport&&this.transport.leave)this.transport.leave();}catch{}
     this.transport=null;
     if(this.pendingResolve){const r=this.pendingResolve;this.pendingResolve=null;r(Error('连接已关闭'));}
@@ -178,6 +249,11 @@ class TabletopP2PConnection{
           case 'join':this.handleGuestJoin(peerId,msg);break;
           case 'command':this.handleGuestCommand(peerId,msg);break;
           case 'lobby':this.handleGuestLobby(peerId,msg);break;
+          case 'ping':{
+            const seat=this.seatByPeer.get(peerId);
+            if(seat!==undefined&&this.roomState.seats[seat])this.roomState.seats[seat].seen=Date.now();
+            break;
+          }
           case 'state-request':{
             const seat=this.seatByPeer.get(peerId);
             if(seat!==undefined)this.transport.sendTo(peerId,{kind:'snapshot',snapshot:snapshot(this.roomState,seat)});
@@ -202,7 +278,7 @@ class TabletopP2PConnection{
   sendJoin(){
     if(this.joined)return;
     this.joined=true;
-    this.transport.sendTo(this.hostPeerId,{kind:'join',name:this.id.name||'',seat:this.id.seat,token:this.id.token,spectator:!!this.id.spectator});
+    this.sendSafe(this.hostPeerId,{kind:'join',name:this.id.name||'',seat:this.id.seat,token:this.id.token,spectator:!!this.id.spectator});
   }
   onWelcome(msg,peerId){
     this.hostPeerId=peerId;
@@ -278,10 +354,10 @@ class TabletopP2PConnection{
   broadcastSnapshots(ackSeat=null,ackId=null){
     const r=this.roomState;
     for(const [peerId,seat] of this.seatByPeer){
-      this.transport.sendTo(peerId,{kind:'snapshot',snapshot:snapshot(r,seat),...(seat===ackSeat?{ack:ackId}:{})});
+      this.sendSafe(peerId,{kind:'snapshot',snapshot:snapshot(r,seat),...(seat===ackSeat?{ack:ackId}:{})});
     }
     for(const peerId of this.spectators.keys()){
-      this.transport.sendTo(peerId,{kind:'snapshot',snapshot:snapshot(r,null)});
+      this.sendSafe(peerId,{kind:'snapshot',snapshot:snapshot(r,null)});
     }
     this.accept(snapshot(r, this.id.seat), this.id.seat===ackSeat?ackId:null);
   }
@@ -304,7 +380,6 @@ class TabletopP2PConnection{
     if(!this.transport||!this.hostPeerId)throw Error('尚未连接房主');
     return new Promise((resolve,reject)=>{
       this.pendingResolve=resolve;
-      this.sendCommand();
       this.cancel(this.pendingTimer);
       this.pendingTimer=this.schedule(()=>{
         if(this.pendingResolve&&!this.closed){
@@ -313,12 +388,13 @@ class TabletopP2PConnection{
           r();
         }
       },15000);
+      this.sendCommand();
     });
   }
   sendCommand(){
     if(!this.transport||!this.hostPeerId||!this.pending)return;
     const p=this.pending;
-    this.transport.sendTo(this.hostPeerId,{kind:'command',id:p.id,type:p.type,args:p.args,revision:p.revision,seat:this.id.seat,token:this.id.token});
+    this.sendSafe(this.hostPeerId,{kind:'command',id:p.id,type:p.type,args:p.args,revision:p.revision,seat:this.id.seat,token:this.id.token});
     this.cancel(this.retryTimer);
     this.retryTimer=this.schedule(()=>{if(this.pending&&!this.closed)this.sendCommand();},4000);
   }
@@ -335,7 +411,7 @@ class TabletopP2PConnection{
     this.busy=true;
     const before=this.version;
     this.lobbyVersion=before;
-    this.transport.sendTo(this.hostPeerId,{kind:'lobby',op:route,args});
+    this.sendSafe(this.hostPeerId,{kind:'lobby',op:route,args});
     await new Promise(resolve=>{
       const entry={resolve:()=>{this.busy=false;resolve();}};
       this.lobbyResolve=entry;
@@ -394,6 +470,6 @@ class TabletopP2PConnection{
   }
 }
 
-const api={TabletopP2PConnection,createRoomState,snapshot,randCode,randToken,connectTransport,clone,digest,HOST_KEY,loadHostState:TabletopP2PConnection.loadHostState,clearHostState:TabletopP2PConnection.clearHostState};
+const api={TabletopP2PConnection,createRoomState,snapshot,randCode,randToken,connectTransport,clone,digest,HOST_KEY,ROUTE_KEY,loadHostState:TabletopP2PConnection.loadHostState,clearHostState:TabletopP2PConnection.clearHostState};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.TabletopP2P=api;
 })(typeof window==='undefined'?globalThis:window);

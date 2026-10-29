@@ -7,6 +7,25 @@ const KEY='iteration-table-v4-seat',SAVE='iteration-table-v4-save',PREF='iterati
 const LOCAL_PREVIEW=['127.0.0.1','localhost'].includes(location.hostname);
 const SHOWCASE=LOCAL_PREVIEW&&new URLSearchParams(location.search).has('showcase');
 const P2P_ONLY=window.ITERATION_P2P_ONLY===true;
+const P2P_ROUTE_KEY='iteration-table-v4-p2p-route';
+function currentP2PRoute(){
+ const p=new URLSearchParams(location.search).get('p2p');
+ if(p==='webconnect'||p==='trystero'||p==='auto')return p;
+ try{const s=localStorage.getItem(P2P_ROUTE_KEY);if(s==='webconnect'||s==='trystero'||s==='auto')return s;}catch{}
+ return 'webconnect';
+}
+function applyP2PRoute(route){
+ try{localStorage.setItem(P2P_ROUTE_KEY,route);}catch{}
+ const url=new URLSearchParams(location.search);
+ url.set('p2p',route);
+ history.replaceState(null,'',location.pathname+'?'+url.toString());
+}
+function saveP2PRouteFromUI(){
+ const el=document.getElementById('p2p-route');
+ if(!el)return;
+ const route=el.value==='webconnect'||el.value==='trystero'||el.value==='auto'?el.value:'webconnect';
+ applyP2PRoute(route);
+}
 const VISUAL_KEY='iteration-table-v4-visual-comparison';
 const root=document.getElementById('table-root'),dialogs=document.getElementById('table-dialogs'),toast=document.getElementById('table-toast');
 let game=null,connection=null,room=null,viewer=null,identity=null,modal=null,locked=false,lastRevision='',status='',homeWonderIndex=0,homeWonderPaused=false,homeWonderState=null,localDraft={count:2,names:['','','',''],mode:'normal'},localOptions={quick:false,legend:false,experimental:false,rules:GameConfig.defaults()};
@@ -41,6 +60,7 @@ function connectP2P(id,snapshot,isHost,roomState){
  current.start().catch(e=>{if(connection===current)notify(e.message);});
 }
 async function p2pCreate(){
+ saveP2PRouteFromUI();
  const name=document.getElementById('entry-name').value.trim()||'房主';
  const mode=document.getElementById('entry-mode').value;
  const capacity=Number(document.getElementById('entry-capacity').value);
@@ -53,6 +73,7 @@ async function p2pCreate(){
  if(mode==='experimental')open('experiment');
 }
 async function p2pJoin(code,spectator){
+ saveP2PRouteFromUI();
  const room=String(code||document.getElementById('entry-code')?.value||'').trim().toUpperCase();
  if(!room)throw Error('请输入房间码');
  const nick=document.getElementById('entry-name')?.value.trim()||prompt('你的昵称');
@@ -176,7 +197,8 @@ async function advanceHomeWonder(manual=true){
  void state.preload(next+2);state.sync();
 }
 function onlineHTML(){
- if(P2P_ONLY)return `<section class="v4-online-entry" id="v4-online-entry"><div class="v4-online-heading"><p class="v4-eyebrow">各自设备 · 2–4人 · 无需服务器</p><h2>邀请朋友，P2P 在线同桌</h2><p>房主浏览器作为主机，玩家间通过 WebRTC 直连。本页托管在 GitHub Pages，打开同一个网址即可加入，无需注册。</p></div><div class="v4-online-fields"><label>你的昵称<input id="entry-name" maxlength="24" placeholder="请输入昵称"></label><label>房间名称<input id="entry-room-name" maxlength="40" placeholder="例如：周五测试局"></label><label>玩家人数<select id="entry-capacity"><option>2</option><option>3</option><option>4</option></select></label><label>对局模式<select id="entry-mode"><option value="normal">标准模式</option><option value="quick">疾速模式</option><option value="legend">一战封神</option><option value="experimental">实验模式</option></select></label></div><div class="v4-online-actions"><button class="v4-original-primary" data-app="p2p-create">创建 P2P 房间</button><button data-app="p2p-resume">续接联机身份</button></div><div class="v4-home-join"><input id="entry-code" maxlength="10" placeholder="朋友提供的房间码" aria-label="房间码"><button data-app="p2p-join">加入房间</button><button data-app="p2p-watch">按房间码观战</button></div><p class="v4-home-privacy">房主浏览器运行权威规则；请与信任的朋友游玩。</p></section>`;
+ const route=currentP2PRoute();
+ if(P2P_ONLY)return `<section class="v4-online-entry" id="v4-online-entry"><div class="v4-online-heading"><p class="v4-eyebrow">各自设备 · 2–4人 · 无需服务器</p><h2>邀请朋友，P2P 在线同桌</h2><p>房主浏览器作为主机，玩家间通过 WebRTC 直连。本页托管在 GitHub Pages，打开同一个网址即可加入，无需注册。支持两条数据通道，默认 webConnect。</p></div><div class="v4-online-fields"><label>你的昵称<input id="entry-name" maxlength="24" placeholder="请输入昵称"></label><label>房间名称<input id="entry-room-name" maxlength="40" placeholder="例如：周五测试局"></label><label>玩家人数<select id="entry-capacity"><option>2</option><option>3</option><option>4</option></select></label><label>对局模式<select id="entry-mode"><option value="normal">标准模式</option><option value="quick">疾速模式</option><option value="legend">一战封神</option><option value="experimental">实验模式</option></select></label><label>数据通道<select id="p2p-route"><option value="webconnect"'+(route==='webconnect'?' selected':'')+'>webConnect（默认）</option><option value="trystero"'+(route==='trystero'?' selected':'')+'>Trystero</option><option value="auto"'+(route==='auto'?' selected':'')+'>自动（Trystero→webConnect）</option></select></label></div><div class="v4-online-actions"><button class="v4-original-primary" data-app="p2p-create">创建 P2P 房间</button><button data-app="p2p-resume">续接联机身份</button></div><div class="v4-home-join"><input id="entry-code" maxlength="10" placeholder="朋友提供的房间码" aria-label="房间码"><button data-app="p2p-join">加入房间</button><button data-app="p2p-watch">按房间码观战</button></div><p class="v4-home-privacy">房主浏览器运行权威规则；请与信任的朋友游玩。邀请链接会自动带上所选通道。</p></section>`;
  return `<section class="v4-online-entry" id="v4-online-entry"><div class="v4-online-heading"><p class="v4-eyebrow">各自设备 · 2–4人 · 私人手牌</p><h2>邀请朋友，在线同桌</h2><p>使用昵称和房间码加入，无需注册。电脑与手机可以一起玩。</p></div><div class="v4-online-fields"><label>你的昵称<input id="entry-name" maxlength="24" placeholder="请输入昵称"></label><label>房间名称<input id="entry-room-name" maxlength="40" placeholder="例如：周五测试局"></label><label>玩家人数<select id="entry-capacity"><option>2</option><option>3</option><option>4</option></select></label><label>对局模式<select id="entry-mode"><option value="normal">标准模式</option><option value="quick">疾速模式</option><option value="legend">一战封神</option><option value="experimental">实验模式</option></select></label></div><div class="v4-home-checks"><label class="check"><input id="entry-listed" type="checkbox" checked>在大厅显示</label><label class="check"><input id="entry-spectators" type="checkbox" checked>允许观战</label></div><div class="v4-online-actions"><button class="v4-original-primary" data-app="create">创建联机房间</button><button data-app="rooms">浏览房间大厅</button><button data-app="resume-online">续接联机身份</button></div><div class="v4-home-join"><input id="entry-code" maxlength="10" placeholder="朋友提供的房间码" aria-label="房间码"><button data-app="join">加入房间</button><button data-app="watch">按房间码观战</button></div></section>`;
 }
 function homeHTML(){
@@ -285,7 +307,7 @@ async function dispatch(name,target){if(name.startsWith('preset-')||['game-stats
   if(P2P_ONLY&&p2pImportCredential(value))return;
   if(value?.format==='科技史桌游玩家续接凭证'){if(value.server!==location.origin)throw Error('请在凭证对应的网址使用');const result=await request('state?room='+value.room,null,value.token);connect({room:value.room,token:value.token,seat:result.seat},result);}else{game=HistoryGame.restore(DATA,JSON.stringify(value));connection?.close();connection=null;room=null;viewer=null;locked=true;save();render();}});break;
  case 'start-local':{const count=Number(document.getElementById('local-count').value),names=Array.from({length:count},(_,i)=>document.getElementById('local-name-'+i).value.trim()||'玩家'+(i+1)),mode=target.dataset.mode||document.getElementById('local-mode')?.value||'normal';localNew(names,{quick:mode==='quick',legend:mode==='legend',experimental:mode==='experimental',rules:localOptions.rules});close();break;}
- case 'copy-code':await navigator.clipboard.writeText(room.room);notify('房间码已复制');break;case 'copy-invite':{const base=location.href.split('?')[0];await navigator.clipboard.writeText(base+'?room='+room.room);notify('邀请链接已复制');break;}
+ case 'copy-code':await navigator.clipboard.writeText(room.room);notify('房间码已复制');break;case 'copy-invite':{const base=location.href.split('?')[0];const route=currentP2PRoute();await navigator.clipboard.writeText(base+'?room='+room.room+'&p2p='+route);notify('邀请链接已复制（含 '+route+' 通道）');break;}
  case 'export-seat':{if(!identity?.token)throw Error('观战者没有玩家凭证');if(P2P_ONLY)download('更迭-P2P续接凭证.json',JSON.stringify({format:'科技史桌游P2P续接凭证',room:identity.room,seat:identity.seat,token:identity.token,name:identity.name||'',isHost:!!identity.isHost,spectator:!!identity.spectator}));else download('更迭-玩家续接凭证.json',JSON.stringify({format:'科技史桌游玩家续接凭证',room:identity.room,token:identity.token,server:location.origin}));break;}
  case 'leave':sessionStorage.setItem(MODE_KEY,'home');connection?.close();connection=null;room=null;game=null;viewer=null;render();break;
  case 'ready':await connection.lobby('ready',{ready:!room.seats[room.seat].ready});break;case 'start-room':await connection.lobby('start');break;
